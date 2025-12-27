@@ -1,22 +1,19 @@
-use glam::{Mat3A, Vec2, Vec3A};
-use uefi::boot::{get_handle_for_protocol, open_protocol_exclusive, ScopedProtocol};
-use uefi::proto::console::gop::{BltPixel, GraphicsOutput};
-use crate::ascii_font::FONT_8X16;
-use crate::error::{OK, Result};
-use crate::t;
 use alloc::vec;
 use alloc::vec::Vec;
+use glam::{Mat3A, Vec2, Vec3A};
+use uefi::boot::{get_handle_for_protocol, open_protocol_exclusive, ScopedProtocol};
+use uefi::proto::console::gop::{BltPixel, FrameBuffer, GraphicsOutput, PixelFormat};
+use crate::{t, world};
+use crate::ascii_font::FONT_8X16;
+use crate::error::OK;
 
 pub const FB_W: usize = 320;
 pub const FB_H: usize = 200;
 
-const SKY_COLOR_PIXEL: BltPixel = BltPixel::new(135, 206, 235);
 const SKY_COLOR_VEC: Vec3A = Vec3A::new(135.0 / 255.0, 206.0 / 255.0, 235.0 / 255.0);
 const FOG_DISTANCE: f32 = 32.0;
 
-pub static mut FRAME_BUFFER: [BltPixel; FB_W * FB_H] = [SKY_COLOR_PIXEL; FB_W * FB_H];
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Player {
     pub pos: Vec3A,
     pub velocity: Vec3A,
@@ -31,50 +28,17 @@ pub struct Screen {
 }
 
 impl Screen {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> crate::error::Result<Self> {
         let gop = t!(get_handle_for_protocol::<GraphicsOutput>());
         let gop = t!(open_protocol_exclusive::<GraphicsOutput>(gop));
         Ok(Self { gop, row_ptr: 0 })
     }
 
-    pub fn draw_buffer(&mut self) -> Result {
+    pub fn clear(&mut self, color: BltPixel) -> crate::error::Result {
         let (w, h) = self.gop.current_mode_info().resolution();
         let stride = self.gop.current_mode_info().stride();
-        let fb_ptr = self.gop.frame_buffer().as_mut_ptr() as *mut u8;
+        let fb_ptr = self.gop.frame_buffer().as_mut_ptr();
 
-        let (scale_w, scale_h) = (w / FB_W, h / FB_H);
-        let mut line_buffer: Vec<BltPixel> = vec![BltPixel::new(0, 0, 0); w];
-
-        for py in 0..FB_H {
-            for px in 0..FB_W {
-                let pixel = unsafe { FRAME_BUFFER[py * FB_W + px] };
-                let x_start = px * scale_w;
-                for i in 0..scale_w {
-                    if x_start + i < w {
-                        line_buffer[x_start + i] = pixel;
-                    }
-                }
-            }
-
-            let y_start = py * scale_h;
-            for i in 0..scale_h {
-                let y_dest = y_start + i;
-                if y_dest < h {
-                    unsafe {
-                        let dest_ptr = fb_ptr.add(y_dest * stride * 4);
-                        core::ptr::copy_nonoverlapping(line_buffer.as_ptr() as *const u8, dest_ptr, w * 4);
-                    }
-                }
-            }
-        }
-        OK
-    }
-
-    pub fn clear(&mut self, color: BltPixel) -> Result {
-        let (w, h) = self.gop.current_mode_info().resolution();
-        let stride = self.gop.current_mode_info().stride();
-        let fb_ptr = self.gop.frame_buffer().as_mut_ptr() as *mut u8;
-        
         let line: Vec<BltPixel> = vec![color; w];
         let line_bytes = unsafe { core::slice::from_raw_parts(line.as_ptr() as *const u8, w * 4) };
 
@@ -90,7 +54,7 @@ impl Screen {
     pub fn println(&mut self, text: &str) {
         let (width, height) = self.gop.current_mode_info().resolution();
         let stride = self.gop.current_mode_info().stride();
-        let fb_ptr = self.gop.frame_buffer().as_mut_ptr() as *mut u8;
+        let fb_ptr = self.gop.frame_buffer().as_mut_ptr();
 
         let fg = BltPixel::new(255, 255, 255);
         let bg = BltPixel::new(0, 0, 0);
@@ -124,9 +88,9 @@ impl Screen {
                     let is_fg = (row_bits >> (7 - x_offset)) & 1 == 1;
                     let x = current_x + x_offset;
                     if x >= width { continue; }
-                    
+
                     let color = if is_fg { fg } else { bg };
-                    
+
                     unsafe {
                         let byte_offset = (y * stride + x) * 4;
                         (fb_ptr.add(byte_offset) as *mut BltPixel).write_volatile(color);
@@ -139,13 +103,34 @@ impl Screen {
     }
 }
 
-use crate::world;
+pub fn ray_march(
+    player: &Player,
+    start_y: usize,
+    end_y: usize,
+    fb: &mut FrameBuffer,
+    stride: usize,
+    (width, height): (usize, usize),
+    pixel_format: PixelFormat,
+) {
+    let rot = Mat3A::from_rotation_y(player.yaw) * Mat3A::from_rotation_x(player.pitch);
 
-pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
+    type PixelWriter = unsafe fn(&mut FrameBuffer, usize, [u8; 3]);
+    fn write_pixel_rgb(fb: &mut FrameBuffer, pixel_base: usize, rgb: [u8; 3]) {
+        unsafe { fb.write_value(pixel_base, rgb) }
+    }
+    fn write_pixel_bgr(fb: &mut FrameBuffer, pixel_base: usize, rgb: [u8; 3]) {
+        unsafe { fb.write_value(pixel_base, [rgb[2], rgb[1], rgb[0]]) } 
+    }
+
+    let write_pixel: PixelWriter = match pixel_format {
+        PixelFormat::Rgb => write_pixel_rgb,
+        PixelFormat::Bgr => write_pixel_bgr,
+        _ => return, // 不支持的像素格式
+    };
+
     for y in start_y..end_y {
-        for x in 0..FB_W {
-            let uv = Vec2::new(x as f32, y as f32) / Vec2::new(FB_W as f32, FB_H as f32) * 2.0 - 1.0;
-            let rot = Mat3A::from_rotation_y(player.yaw) * Mat3A::from_rotation_x(player.pitch);
+        for x in 0..width {
+            let uv = Vec2::new(x as f32, y as f32) / Vec2::new(width as f32, height as f32) * 2.0 - 1.0;
             let dir = (rot * Vec3A::new(uv.x, -uv.y, 1.0)).normalize();
 
             let step = dir.signum().as_ivec3();
@@ -175,9 +160,6 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
             let mut current_map_pos = map_pos;
 
             for _ in 0..128 {
-                let min_dist_val = side_dist.min_element();
-                if min_dist_val > FOG_DISTANCE { break; }
-
                 if side_dist.x < side_dist.y && side_dist.x < side_dist.z {
                     hit_dist = side_dist.x;
                     side_dist.x += delta.x;
@@ -195,39 +177,39 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
                     side = 2;
                 }
 
+                if hit_dist > FOG_DISTANCE { break; }
+
                 hit = world::get_block(current_map_pos.x, current_map_pos.y, current_map_pos.z);
                 if hit > 0 { break; }
             }
 
-            let color = if hit > 0 {
+            let final_color_vec = if hit > 0 && hit_dist <= FOG_DISTANCE {
                 let mut brightness = 1.0;
                 if side == 0 { brightness = 0.8; }
                 if side == 2 { brightness = 0.6; }
 
                 let block_color_vec = match hit {
-                    1 => Vec3A::new(0.5, 0.5, 0.5), // 石头
-                    2 => Vec3A::new(0.2, 0.8, 0.2), // 墙 (绿色)
-                    3 => Vec3A::new(0.6, 0.4, 0.2), // 柱子 (棕色)
+                    1 => Vec3A::new(0.5, 0.5, 0.5), // Stone
+                    2 => Vec3A::new(0.2, 0.8, 0.2), // Wall (Green)
+                    3 => Vec3A::new(0.6, 0.4, 0.2), // Pillar (Brown)
                     _ => Vec3A::new(1.0, 1.0, 1.0),
                 };
 
-                let mut final_color_vec = block_color_vec * brightness;
                 let fog_factor = (hit_dist / FOG_DISTANCE).clamp(0.0, 1.0);
-                final_color_vec = final_color_vec.lerp(SKY_COLOR_VEC, fog_factor);
-
-                BltPixel::new(
-                    (final_color_vec.x * 255.0) as u8,
-                    (final_color_vec.y * 255.0) as u8,
-                    (final_color_vec.z * 255.0) as u8,
-                )
+                (block_color_vec * brightness).lerp(SKY_COLOR_VEC, fog_factor)
             } else {
-                SKY_COLOR_PIXEL
+                SKY_COLOR_VEC
             };
 
-            let idx = y * FB_W + x;
-            // The check `idx < FRAME_BUFFER.len()` was removed, as it's both redundant
-            // due to loop bounds and causes a borrow error on a mutable static.
-            unsafe { FRAME_BUFFER[idx] = color };
+            let rgb = [
+                (final_color_vec.x * 255.0) as u8,
+                (final_color_vec.y * 255.0) as u8,
+                (final_color_vec.z * 255.0) as u8,
+            ];
+
+            let pixel_index = y * stride + x;
+            let pixel_base = 4 * pixel_index;
+            unsafe { write_pixel(fb, pixel_base, rgb) };
         }
     }
 }

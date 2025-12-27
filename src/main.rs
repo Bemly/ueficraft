@@ -33,6 +33,7 @@ fn main() -> Status {
         kernel_panic(&mut scr, e);
     }
 
+    boot::stall(Duration::from_mins(2));
     Status::SUCCESS
 }
 

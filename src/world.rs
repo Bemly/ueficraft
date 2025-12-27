@@ -146,11 +146,9 @@ pub fn init_world() {
 
 /// 公共API，从全局世界中获取方块
 pub fn get_block(x: i32, y: i32, z: i32) -> u8 {
-    unsafe {
-        if let Some(svo) = unsafe { (*(&raw const SVO_WORLD)).as_ref() } {
-            svo.get_block(x, y, z)
-        } else {
-            0
-        }
+    if let Some(svo) = unsafe { (*(&raw const SVO_WORLD)).as_ref() } {
+        svo.get_block(x, y, z)
+    } else {
+        0
     }
 }

@@ -1,4 +1,5 @@
 use core::ffi::c_void;
+use uefi::proto::unsafe_protocol;
 use uefi_raw::{guid, Boolean, Event, Guid, Status};
 use uefi_raw::protocol::console::InputKey;
 
@@ -52,6 +53,7 @@ pub type KeyNotifyFunction = extern "efiapi" fn(key_data: *mut KeyData) -> Statu
 /// 允许获取修饰键（Shift/Alt/Ctrl）状态的扩展输入协议
 #[derive(Debug)]
 #[repr(C)]
+#[unsafe_protocol("dd9e7534-7762-4698-8c14-f58517a625aa")]
 pub struct SimpleTextInputExProtocol {
     /// 重置输入设备硬件
     pub reset: extern "efiapi" fn(this: *mut Self, extended_verification: Boolean) -> Status,
