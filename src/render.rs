@@ -19,8 +19,10 @@ pub static mut FRAME_BUFFER: [BltPixel; FB_W * FB_H] = [SKY_COLOR_PIXEL; FB_W * 
 #[derive(Clone, Copy)]
 pub struct Player {
     pub pos: Vec3A,
-    pub rot: Mat3A,
     pub velocity: Vec3A,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub is_crouching: bool,
 }
 
 pub struct Screen {
@@ -143,7 +145,8 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
     for y in start_y..end_y {
         for x in 0..FB_W {
             let uv = Vec2::new(x as f32, y as f32) / Vec2::new(FB_W as f32, FB_H as f32) * 2.0 - 1.0;
-            let dir = (player.rot * Vec3A::new(uv.x, -uv.y, 1.0)).normalize();
+            let rot = Mat3A::from_rotation_y(player.yaw) * Mat3A::from_rotation_x(player.pitch);
+            let dir = (rot * Vec3A::new(uv.x, -uv.y, 1.0)).normalize();
 
             let step = dir.signum().as_ivec3();
             let map_pos = player.pos.as_ivec3();

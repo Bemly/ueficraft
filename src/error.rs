@@ -78,7 +78,7 @@ impl From<uefi::Error> for ErrorType {
 
 /// 捕获错误并打印
 #[allow(unused_variables, unused_imports)]
-pub fn kernel_panic(scr:&mut Screen, e: Error) {
+pub fn kernel_panic(scr:&mut Screen, e: Error) -> ! {
     use alloc::format;
     macro_rules! println {
         ($($arg:tt)*) => { scr.println(&alloc::format!($($arg)*)) }
