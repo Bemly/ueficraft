@@ -1,10 +1,11 @@
 [package]
 name = "ueficraft"
-version = "0.1.0"
-edition = "2021"
+version = "0.1.2"
+edition = "2024"
 
 [dependencies]
-uefi = { version = "0.36.1", features = ["logger","alloc","global_allocator","panic_handler"] }
+glam = { version = "0.30.9", default-features = false, features = ["zerocopy", "libm"] }
+uefi = { version = "0.36.1", features = ["logger", "alloc", "global_allocator", "panic_handler"] }
 
 
 [profile.release]

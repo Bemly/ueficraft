@@ -1,6 +1,5 @@
 use alloc::borrow::Cow;
-use alloc::format;
-use crate::graphics::Screen;
+use crate::Screen;
 
 /// 返回结构的默认参数构造
 pub type Result<T = (), E = Error> = core::result::Result<T, E>;
@@ -78,7 +77,9 @@ impl From<uefi::Error> for ErrorType {
 }
 
 /// 捕获错误并打印
+#[allow(unused_variables, unused_imports)]
 pub fn kernel_panic(scr:&mut Screen, e: Error) {
+    use alloc::format;
     macro_rules! println {
         ($($arg:tt)*) => { scr.println(&alloc::format!($($arg)*)) }
     }
