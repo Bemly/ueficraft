@@ -16,9 +16,11 @@ const FOG_DISTANCE: f32 = 32.0;
 
 pub static mut FRAME_BUFFER: [BltPixel; FB_W * FB_H] = [SKY_COLOR_PIXEL; FB_W * FB_H];
 
+#[derive(Clone, Copy)]
 pub struct Player {
     pub pos: Vec3A,
     pub rot: Mat3A,
+    pub velocity: Vec3A,
 }
 
 pub struct Screen {
@@ -141,17 +143,33 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
     for y in start_y..end_y {
         for x in 0..FB_W {
             let uv = Vec2::new(x as f32, y as f32) / Vec2::new(FB_W as f32, FB_H as f32) * 2.0 - 1.0;
-            let dir = (player.rot * Vec3A::new(uv.x, uv.y, 1.0)).normalize();
+            let dir = (player.rot * Vec3A::new(uv.x, -uv.y, 1.0)).normalize();
 
-            let mut ray_pos = player.pos;
             let step = dir.signum().as_ivec3();
+            let map_pos = player.pos.as_ivec3();
             let delta = (1.0 / dir).abs();
 
-            let mut side_dist = (step.as_vec3a() * (ray_pos.fract() - 0.5) + 0.5) * delta;
+            let mut side_dist = Vec3A::ZERO;
+            if dir.x < 0.0 {
+                side_dist.x = (player.pos.x - map_pos.x as f32) * delta.x;
+            } else {
+                side_dist.x = (map_pos.x as f32 + 1.0 - player.pos.x) * delta.x;
+            }
+            if dir.y < 0.0 {
+                side_dist.y = (player.pos.y - map_pos.y as f32) * delta.y;
+            } else {
+                side_dist.y = (map_pos.y as f32 + 1.0 - player.pos.y) * delta.y;
+            }
+            if dir.z < 0.0 {
+                side_dist.z = (player.pos.z - map_pos.z as f32) * delta.z;
+            } else {
+                side_dist.z = (map_pos.z as f32 + 1.0 - player.pos.z) * delta.z;
+            }
 
             let mut hit = 0;
             let mut side = 0;
             let mut hit_dist = 0.0;
+            let mut current_map_pos = map_pos;
 
             for _ in 0..128 {
                 let min_dist_val = side_dist.min_element();
@@ -160,21 +178,21 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
                 if side_dist.x < side_dist.y && side_dist.x < side_dist.z {
                     hit_dist = side_dist.x;
                     side_dist.x += delta.x;
-                    ray_pos.x += step.x as f32;
+                    current_map_pos.x += step.x;
                     side = 0;
                 } else if side_dist.y < side_dist.z {
                     hit_dist = side_dist.y;
                     side_dist.y += delta.y;
-                    ray_pos.y += step.y as f32;
+                    current_map_pos.y += step.y;
                     side = 1;
                 } else {
                     hit_dist = side_dist.z;
                     side_dist.z += delta.z;
-                    ray_pos.z += step.z as f32;
+                    current_map_pos.z += step.z;
                     side = 2;
                 }
 
-                hit = world::get_block(ray_pos.x as i32, ray_pos.y as i32, ray_pos.z as i32);
+                hit = world::get_block(current_map_pos.x, current_map_pos.y, current_map_pos.z);
                 if hit > 0 { break; }
             }
 
