@@ -184,7 +184,9 @@ pub fn ray_march(player: &Player, start_y: usize, end_y: usize) {
                 if side == 2 { brightness = 0.6; }
 
                 let block_color_vec = match hit {
-                    1 => Vec3A::new(0.5, 0.5, 0.5),
+                    1 => Vec3A::new(0.5, 0.5, 0.5), // 石头
+                    2 => Vec3A::new(0.2, 0.8, 0.2), // 墙 (绿色)
+                    3 => Vec3A::new(0.6, 0.4, 0.2), // 柱子 (棕色)
                     _ => Vec3A::new(1.0, 1.0, 1.0),
                 };
 

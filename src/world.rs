@@ -116,18 +116,31 @@ impl Svo {
     }
 }
 
-/// 初始化世界，生成一个简单的地面
+/// 初始化世界
 pub fn init_world() {
     let mut svo = Svo::new();
-    let size = 16;
-    let height = 8;
+    let size = 32;
+
+    // 创建一个y=0的地面
     for x in 0..size {
         for z in 0..size {
-            for y in 0..height {
-                svo.insert(x, y, z, 1); // 石头
-            }
+            svo.insert(x, 0, z, 1); // 石头地面
         }
     }
+
+    // 创建一些墙
+    for x in 0..size {
+        svo.insert(x, 1, 0, 2); // 墙
+        svo.insert(x, 2, 0, 2);
+        svo.insert(0, 1, x, 2);
+        svo.insert(0, 2, x, 2);
+    }
+
+    // 创建一个柱子
+    for y in 1..5 {
+        svo.insert(10, y, 10, 3); // 柱子
+    }
+
     unsafe { SVO_WORLD = Some(svo); }
 }
 

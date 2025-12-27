@@ -11,7 +11,8 @@ use crate::t;
 
 static PANIC_STATE: AtomicBool = AtomicBool::new(false);
 static mut PLAYER: Player = Player {
-    pos: Vec3A::new(8.5, 9.5, 4.5),
+    // 出生在 (4.5, 3.0, 4.5)，确保在地面y=0之上
+    pos: Vec3A::new(4.5, 3.0, 4.5),
     rot: Mat3A::IDENTITY,
 };
 
@@ -22,12 +23,9 @@ pub struct GameContext<'a> {
     pub num_cores: usize,
 }
 
-/// efiapi 只能访问static全局静态变量 或者是 arg上下文参数
 pub extern "efiapi" fn game_task(arg: *mut c_void) {
     if arg.is_null() { return; }
-    // 不安全的获取参数上下文
     let ctx = unsafe { &mut *arg.cast::<GameContext>() };
-    // 初始化失败一个核就设置全局错误状态,进入打印错误代码阶段
     if let Err(e) = run(ctx) {
         PANIC_STATE.store(true, Ordering::SeqCst);
         kernel_panic(&mut *ctx.scr, e)
@@ -36,14 +34,45 @@ pub extern "efiapi" fn game_task(arg: *mut c_void) {
 
 use crate::world;
 
+// 玩家身高，用于碰撞检测
+const PLAYER_HEIGHT: f32 = 1.8;
+// 玩家眼睛高度在身高中的比例
+const PLAYER_EYE_RATIO: f32 = 0.9;
+// 玩家宽度，用于碰撞检测
+const PLAYER_WIDTH: f32 = 0.6;
+
+
+/// 检查给定位置是否会与方块发生碰撞
+/// pos: 玩家眼睛的目标位置
+fn is_colliding(pos: Vec3A) -> bool {
+    let half_width = PLAYER_WIDTH / 2.0;
+    let feet_y = pos.y - PLAYER_HEIGHT * PLAYER_EYE_RATIO;
+    let head_y = pos.y + PLAYER_HEIGHT * (1.0 - PLAYER_EYE_RATIO);
+
+    // 检查一个包围盒内的8个角点 + 中心点
+    for dx in &[-half_width, half_width] {
+        for dz in &[-half_width, half_width] {
+            let check_x = pos.x + dx;
+            let check_z = pos.z + dz;
+            // 检查脚部、腰部、头部
+            if world::get_block(check_x as i32, feet_y as i32, check_z as i32) > 0 ||
+               world::get_block(check_x as i32, pos.y as i32, check_z as i32) > 0 ||
+               world::get_block(check_x as i32, head_y as i32, check_z as i32) > 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn run(ctx: &mut GameContext) -> Result {
     let id = t!(ctx.mp.who_am_i());
 
     if id == 0 {
         world::init_world();
-        // 初始化摄像机向下看
         unsafe {
-            PLAYER.rot = Mat3A::from_rotation_x(-0.2);
+            // 初始化摄像机稍微向下看
+            PLAYER.rot = Mat3A::from_rotation_x(0.2);
         }
     }
 
@@ -54,14 +83,16 @@ pub fn run(ctx: &mut GameContext) -> Result {
         if id == 0 {
             system::with_stdin(|input| {
                 if let Ok(Some(key)) = input.read_key() {
-                    // 不安全的可变静态变量访问
                     unsafe {
+                        let move_speed = 0.15;
+                        let mut move_vec = Vec3A::ZERO;
+
                         match key {
                             Key::Printable(wide_char) => match wide_char.into() {
-                                'w' => PLAYER.pos += PLAYER.rot.z_axis * 0.1,
-                                's' => PLAYER.pos -= PLAYER.rot.z_axis * 0.1,
-                                'a' => PLAYER.pos -= PLAYER.rot.x_axis * 0.1,
-                                'd' => PLAYER.pos += PLAYER.rot.x_axis * 0.1,
+                                'w' | 'W' => move_vec += PLAYER.rot.z_axis,
+                                's' | 'S' => move_vec -= PLAYER.rot.z_axis,
+                                'a' | 'A' => move_vec -= PLAYER.rot.x_axis,
+                                'd' | 'D' => move_vec += PLAYER.rot.x_axis,
                                 _ => {}
                             },
                             Key::Special(special_key) => match special_key {
@@ -69,10 +100,29 @@ pub fn run(ctx: &mut GameContext) -> Result {
                                 ScanCode::DOWN => PLAYER.rot *= Mat3A::from_rotation_x(-0.1),
                                 ScanCode::LEFT => PLAYER.rot *= Mat3A::from_rotation_y(0.1),
                                 ScanCode::RIGHT => PLAYER.rot *= Mat3A::from_rotation_y(-0.1),
-                                ScanCode::PAGE_UP => PLAYER.pos.y += 0.1,
-                                ScanCode::PAGE_DOWN => PLAYER.pos.y -= 0.1,
+                                ScanCode::PAGE_UP => move_vec.y += 1.0,
+                                ScanCode::PAGE_DOWN => move_vec.y -= 1.0,
                                 _ => {}
                             },
+                        }
+
+                        // 水平移动
+                        let mut horizontal_move = Vec3A::new(move_vec.x, 0.0, move_vec.z);
+                        if horizontal_move.length_squared() > 0.0 {
+                            horizontal_move = horizontal_move.normalize() * move_speed;
+                        }
+
+                        // 垂直移动
+                        let vertical_move = Vec3A::new(0.0, move_vec.y * move_speed, 0.0);
+
+                        let new_pos = PLAYER.pos + horizontal_move + vertical_move;
+
+                        if !is_colliding(new_pos) {
+                            PLAYER.pos = new_pos;
+                        } else if !is_colliding(PLAYER.pos + horizontal_move) {
+                            PLAYER.pos += horizontal_move;
+                        } else if !is_colliding(PLAYER.pos + vertical_move) {
+                            PLAYER.pos += vertical_move;
                         }
                     }
                 }
@@ -88,7 +138,6 @@ pub fn run(ctx: &mut GameContext) -> Result {
             (id + 1) * rows_per_core
         };
 
-        // 从共享静态变量中读取player状态
         let player = unsafe { &(*addr_of_mut!(PLAYER)) };
         ray_march(&player, start_y, end_y);
 
