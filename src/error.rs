@@ -77,8 +77,16 @@ impl From<uefi::Error> for ErrorType {
     }
 }
 
-/// 捕获错误并打印,一把抓住屏幕即刻炼化
-pub fn kernel_panic(mut scr: Screen, e: Error) {
-    scr.println(&format!("Kernel panic at {}:{}\n{}", e.file, e.line, e.info.unwrap_or(Cow::Borrowed(""))));
-    scr.println(&format!("Error: {:?}", e.err));
+/// 捕获错误并打印
+pub fn kernel_panic(scr:&mut Screen, e: Error) {
+    macro_rules! println {
+        ($($arg:tt)*) => { scr.println(&alloc::format!($($arg)*)) }
+    }
+
+    println!("Kernel panic at {}:{}\n{}", e.file, e.line, e.info.unwrap_or(Cow::Borrowed("")));
+    match e.err {
+        ErrorType::Uefi(e) => println!("UEFI error: {}", e),
+        _ => println!("Error: {:?}", e.err),
+    }
+    panic!("Kernel Panic!");
 }
