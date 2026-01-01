@@ -1,4 +1,6 @@
 use alloc::borrow::Cow;
+use core::time::Duration;
+use uefi::boot;
 use crate::Screen;
 
 /// 返回结构的默认参数构造
@@ -28,31 +30,31 @@ pub struct Error {
 macro_rules! throw {
     // 无描述信息
     ($err:expr) => {
-        return Err($crate::error::Error {
+        return core::result::Result::Err($crate::error::Error {
             err: $err.into(),
-            file: file!(),
-            line: line!(),
-            info: None,
+            file: core::file!(),
+            line: core::line!(),
+            info: core::option::Option::None,
         })
     };
 
     // 单个静态字符串字面量
     ($err:expr, $msg:literal) => {
-        return Err($crate::error::Error {
+        return core::result::Result::Err($crate::error::Error {
             err: $err.into(),
-            file: file!(),
-            line: line!(),
-            info: Some(alloc::borrow::Cow::Borrowed($msg)),
+            file: core::file!(),
+            line: core::line!(),
+            info: core::option::Option::Some(alloc::borrow::Cow::Borrowed($msg)),
         })
     };
 
     // 带有格式化参数
-    ($err:expr, $($arg:tt)*) => {
-        return Err($crate::error::Error {
+    ($err:expr, $($arg:tt)+) => {
+        return core::result::Result::Err($crate::error::Error {
             err: $err.into(),
-            file: file!(),
-            line: line!(),
-            info: Some(alloc::borrow::Cow::Owned(alloc::format!($($arg)*))),
+            file: core::file!(),
+            line: core::line!(),
+            info: core::option::Option::Some(alloc::borrow::Cow::Owned(alloc::format!($($arg)*))),
         })
     };
 }
@@ -76,18 +78,25 @@ impl From<uefi::Error> for ErrorType {
     }
 }
 
-/// 捕获错误并打印
+/// 捕获错误并打印 LSP识别不了宏对模块的使用（恼
 #[allow(unused_variables, unused_imports)]
 pub fn kernel_panic(scr:&mut Screen, e: Error) -> ! {
+    const SHUTDOWN_COUNTDOWN_MIN: u64 = 1;
+
     use alloc::format;
     macro_rules! println {
-        ($($arg:tt)*) => { scr.println(&alloc::format!($($arg)*)) }
+        ($($arg:tt)*) => {{
+            let _ = scr.println(&alloc::format!($($arg)*));
+        }} // 打印出错我也不管了
     }
 
-    println!("Kernel panic at {}:{}\n{}", e.file, e.line, e.info.unwrap_or(Cow::Borrowed("")));
+    println!("Kernel panic at {}:{}\n{:?}", e.file, e.line, e.info);
     match e.err {
         ErrorType::Uefi(e) => println!("UEFI error: {}", e),
         _ => println!("Error: {:?}", e.err),
     }
+
+    println!("Kernel will shutdown in {} minute(s).", SHUTDOWN_COUNTDOWN_MIN);
+    boot::stall(Duration::from_mins(SHUTDOWN_COUNTDOWN_MIN));
     panic!("Kernel Panic!");
 }

@@ -39,6 +39,7 @@ fn main() -> Status {
 
 
 fn init(scr: &mut Screen) -> Result {
+    // 防止BIOS把爷程序给中断了
     t!(set_watchdog_timer(0, 0, None));
 
     let mp = t!(get_handle_for_protocol::<MpServices>());
