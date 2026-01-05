@@ -22,6 +22,7 @@ use uefi::proto::pi::mp::MpServices;
 use crate::error::{kernel_panic, OK, Result};
 use crate::game::{game_task, GameContext};
 use crate::render::Screen;
+use crate::world::World;
 
 #[entry]
 fn main() -> Status {
@@ -45,10 +46,14 @@ fn init(scr: &mut Screen) -> Result {
     let mp = t!(open_protocol_exclusive::<MpServices>(mp));
     let num_cores = t!(mp.get_number_of_processors()).enabled;
 
+    let mut world = World::new();
+    world.generate_example();
+
     let mut ctx = GameContext {
         mp: &mp,
         scr,
         num_cores,
+        world,
     };
     let arg_ptr = addr_of_mut!(ctx).cast::<c_void>();
 
