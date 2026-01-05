@@ -88,7 +88,6 @@ impl Screen {
                 let z_ptr = self.z_buffer.add(offset);
                 let fb_ptr = self.frame_buffer.add(offset);
 
-                // Simple loop, compiler might vectorize
                 for i in 0..len {
                     *z_ptr.add(i) = f32::INFINITY;
                     *fb_ptr.add(i) = 0;
@@ -161,7 +160,6 @@ impl Screen {
             let p2 = view_proj * v2.extend(1.0);
             let p3 = view_proj * v3.extend(1.0);
 
-            // Near plane clipping
             if p0.w <= 0.0 || p1.w <= 0.0 || p2.w <= 0.0 || p3.w <= 0.0 { continue; }
 
             let ndc0 = p0.xyz() / p0.w;
@@ -169,7 +167,7 @@ impl Screen {
             let ndc2 = p2.xyz() / p2.w;
             let ndc3 = p3.xyz() / p3.w;
 
-            // Frustum culling in NDC
+            // Frustum culling
             if (ndc0.x < -1.0 && ndc1.x < -1.0 && ndc2.x < -1.0 && ndc3.x < -1.0) ||
                (ndc0.x > 1.0 && ndc1.x > 1.0 && ndc2.x > 1.0 && ndc3.x > 1.0) ||
                (ndc0.y < -1.0 && ndc1.y < -1.0 && ndc2.y < -1.0 && ndc3.y < -1.0) ||
@@ -182,12 +180,11 @@ impl Screen {
             let s2 = Vec3A::new(ndc2.x * half_width + half_width, -ndc2.y * half_height + half_height, ndc2.z);
             let s3 = Vec3A::new(ndc3.x * half_width + half_width, -ndc3.y * half_height + half_height, ndc3.z);
 
-            // Backface culling
+            // Backface culling (CW check for screen space with Y down)
             if (s1.x - s0.x) * (s2.y - s0.y) - (s1.y - s0.y) * (s2.x - s0.x) <= 0.0 {
                 continue;
             }
 
-            // Tile AABB check
             let min_fx = min(min(s0.x as i32, s1.x as i32), min(s2.x as i32, s3.x as i32));
             let max_fx = max(max(s0.x as i32, s1.x as i32), max(s2.x as i32, s3.x as i32));
             let min_fy = min(min(s0.y as i32, s1.y as i32), min(s2.y as i32, s3.y as i32));
@@ -224,12 +221,13 @@ impl Screen {
         if min_x > max_x || min_y > max_y { return; }
 
         unsafe {
+            // Edge function: (B-A) x (P-A)
             let edge = |ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32| -> f32 {
-                (cx - ax) * (by - ay) - (cy - ay) * (bx - ax)
+                (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
             };
 
             let area = edge(v0.x, v0.y, v1.x, v1.y, v2.x, v2.y);
-            if area == 0.0 { return; }
+            if area <= 0.0 { return; }
             let inv_area = 1.0 / area;
 
             let v0_z = _mm_set1_ps(v0.z);
@@ -238,10 +236,14 @@ impl Screen {
             let inv_area_vec = _mm_set1_ps(inv_area);
             let zero = _mm_setzero_ps();
 
+            // Setup edge constants for (B-A) x (P-A)
+            // w = (bx-ax)(py-ay) - (by-ay)(px-ax)
+            //   = (bx-ax)py - (bx-ax)ay - (by-ay)px + (by-ay)ax
+            //   = px(ay-by) + py(bx-ax) + (ax(by-ay) - ay(bx-ax))
             let setup_edge = |ax: f32, ay: f32, bx: f32, by: f32| -> (__m128, __m128, __m128) {
-                let cx = by - ay;
-                let cy = ax - bx;
-                let cc = ay * (bx - ax) - ax * (by - ay);
+                let cx = ay - by;
+                let cy = bx - ax;
+                let cc = ax * (by - ay) - ay * (bx - ax);
                 (_mm_set1_ps(cx), _mm_set1_ps(cy), _mm_set1_ps(cc))
             };
 
@@ -326,12 +328,13 @@ impl Screen {
         let x2 = (v2.x * 256.0) as i32;
         let y2 = (v2.y * 256.0) as i32;
 
+        // (B-A) x (C-A)
         let edge = |ax: i32, ay: i32, bx: i32, by: i32, cx: i32, cy: i32| -> i64 {
-            (cx as i64 - ax as i64) * (by as i64 - ay as i64) - (cy as i64 - ay as i64) * (bx as i64 - ax as i64)
+            (bx as i64 - ax as i64) * (cy as i64 - ay as i64) - (by as i64 - ay as i64) * (cx as i64 - ax as i64)
         };
 
         let area = edge(x0, y0, x1, y1, x2, y2);
-        if area == 0 { return; }
+        if area <= 0 { return; }
 
         let inv_area = 1.0 / area as f32;
 
@@ -346,9 +349,13 @@ impl Screen {
             let mut w1_row = edge(x2, y2, x0, y0, p_x, p_y);
             let mut w2_row = edge(x0, y0, x1, y1, p_x, p_y);
 
-            let dw0_dx = (y1 - y2) as i64 * 256;
+            let dw0_dx = (y1 - y2) as i64 * 256; // -(y2-y1) = y1-y2
             let dw1_dx = (y2 - y0) as i64 * 256;
             let dw2_dx = (y0 - y1) as i64 * 256;
+            // Wait, check dw_dx logic.
+            // w = (bx-ax)(py-ay) - (by-ay)(px-ax)
+            // dw/dpx = -(by-ay) = ay - by.
+            // w0: v1->v2. ay=y1, by=y2. dw0/dx = y1 - y2. Correct.
 
             while x <= max_x {
                 if x + 3 <= max_x {
