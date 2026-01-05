@@ -6,7 +6,6 @@ mod error;
 mod game;
 mod render;
 mod world;
-mod simple_text_input_ex;
 
 extern crate alloc;
 

@@ -2,6 +2,7 @@ use core::ffi::c_void;
 use core::hint::spin_loop;
 use core::sync::atomic::{AtomicBool, Ordering};
 use uefi::proto::pi::mp::MpServices;
+use uefi_input2::init_keyboards_protocol;
 use crate::error::{kernel_panic, OK, Result};
 use crate::render::Screen;
 use crate::t;
@@ -9,12 +10,11 @@ use crate::t;
 static PANIC_STATE: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
-pub struct GameContext<'a> {
-    pub mp: &'a MpServices,
-    pub scr: &'a mut Screen,
+pub struct GameContext<'bemly_> {
+    pub mp: &'bemly_ MpServices,
+    pub scr: &'bemly_ mut Screen,
     pub num_cores: usize,
 }
-
 
 pub extern "efiapi" fn game_task(arg: *mut c_void) {
     if arg.is_null() { return; }
@@ -33,6 +33,8 @@ pub fn run(ctx: &mut GameContext) -> Result {
     let core_id = t!(ctx.mp.who_am_i());
 
     if core_id == 0 {
+
+        let mut keyboards = t!(init_keyboards_protocol());
 
         loop {
             if PANIC_STATE.load(Ordering::Acquire) { break; }

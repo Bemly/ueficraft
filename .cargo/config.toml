@@ -1,0 +1,10 @@
+[build]
+target = "x86_64-unknown-uefi"
+
+[target.x86_64-unknown-uefi]
+# v3(avx,avx2 - 256, CR4复杂, YMM非法)
+# v4(avx512 - 512, 频率偏移, ZMM非法)
+rustflags = [
+    "-C", "target-cpu=x86-64-v2",
+    "-C", "target-feature=+sse,+sse2,+sse3,+sse4.1,+sse4.2,+ssse3,+sha,-mmx,-soft-float",
+]

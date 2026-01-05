@@ -1,12 +1,13 @@
 [package]
 name = "ueficraft"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2024"
+license = "GPL-3"
 
 [dependencies]
 glam = { version = "0.30.9", default-features = false, features = ["zerocopy", "libm"] }
 uefi = { version = "0.36.1", features = ["logger", "alloc", "global_allocator", "panic_handler"] }
-uefi-raw = "0.13.0"
+uefi-input2 = { path = "../uefi-input2", features = ["alloc", "extend"], version = "*" }
 
 
 [profile.release]
